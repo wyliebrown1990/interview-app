@@ -1,6 +1,6 @@
 import os
 import logging
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, url_for, redirect
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -125,6 +125,18 @@ def start_interview():
 
     training_data = load_training_data(job_title, company_name)
     if training_data:
+        return render_template('add_training_data.html', job_title=job_title, company_name=company_name, industry=industry, message="Training data exists. Do you want to add more training data?", skip_url=url_for('start_interview_without_adding', job_title=job_title, company_name=company_name, industry=industry))
+    else:
+        return render_template('add_training_data.html', job_title=job_title, company_name=company_name, industry=industry, message="No training data found. Provide a file path to training data:")
+
+@app.route('/start_interview_without_adding', methods=['GET'])
+def start_interview_without_adding():
+    job_title = request.args.get('job_title').strip().lower()
+    company_name = request.args.get('company_name').strip().lower()
+    industry = request.args.get('industry').strip().lower()
+
+    training_data = load_training_data(job_title, company_name)
+    if training_data:
         initial_question = get_initial_question(training_data, industry)
         session_id = os.urandom(24).hex()
         session_history = get_session_history(session_id)
@@ -133,21 +145,12 @@ def start_interview():
     else:
         return render_template('index.html', message="No training data found. Provide a file path to training data:", job_title=job_title, company_name=company_name)
 
-@app.route('/continue_interview', methods=['POST'])
-def continue_interview():
-    data = request.get_json()
-    user_response = data.get('user_response')
-    session_id = data.get('session_id')
-
-    next_question = get_next_question(session_id, user_response)
-
-    return jsonify({'next_question': next_question})
-
 @app.route('/upload_training_data', methods=['POST'])
 def upload_training_data():
     file_path = request.form['file_path']
     job_title = request.form['job_title'].strip().lower()
     company_name = request.form['company_name'].strip().lower()
+    industry = request.form['industry'].strip().lower()
 
     training_data = load_training_data(job_title, company_name)
     chunks, embedding_array, new_files = create_chunks_and_embeddings_from_new_files(file_path, [])
@@ -167,7 +170,18 @@ def upload_training_data():
         db.session.add(new_training_data)
 
     db.session.commit()
-    return render_template('index.html', message="Training data uploaded successfully.")
+
+    return redirect(url_for('start_interview_without_adding', job_title=job_title, company_name=company_name, industry=industry))
+
+@app.route('/continue_interview', methods=['POST'])
+def continue_interview():
+    data = request.get_json()
+    user_response = data.get('user_response')
+    session_id = data.get('session_id')
+
+    next_question = get_next_question(session_id, user_response)
+
+    return jsonify({'next_question': next_question})
 
 if __name__ == "__main__":
     with app.app_context():
