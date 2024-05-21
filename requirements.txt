@@ -1,0 +1,8 @@
+Flask
+SQLAlchemy
+python-dotenv
+langchain_openai
+langchain_community
+langchain_core
+faiss-cpu
+watchdog==2.1.6

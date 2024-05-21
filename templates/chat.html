@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Chat</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script>
+        async function fetchNextQuestion(event) {
+            event.preventDefault();  // Prevent form submission
+            const userResponse = document.getElementById('user_response').value;
+            const sessionId = document.getElementById('session_id').value;
+            const response = await fetch('/continue_interview', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ user_response: userResponse, session_id: sessionId }),
+            });
+            const data = await response.json();
+            document.getElementById('chat').innerHTML += `
+                <div class="chat-block">
+                    <p>User: ${userResponse}</p>
+                    <p>Bot: ${data.next_question}</p>
+                    <hr>
+                </div>
+            `;
+            document.getElementById('user_response').value = '';  // Clear the input field
+        }
+    </script>
+</head>
+<body>
+    <header>
+        <h1>Interview Chat</h1>
+    </header>
+    <div id="chat">
+        <div class="chat-block">
+            <p>Bot: {{ question }}</p>
+            <hr>
+        </div>
+    </div>
+    <form onsubmit="fetchNextQuestion(event);">
+        <input type="hidden" id="session_id" value="{{ session_id }}">
+        <label for="user_response">Your Response:</label>
+        <input type="text" id="user_response" required>
+        <button type="submit">Send</button>
+    </form>
+</body>
+</html>
