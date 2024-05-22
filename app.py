@@ -57,61 +57,19 @@ def get_session_history(session_id: str) -> ChatMessageHistory:
 def load_training_data(job_title, company_name):
     return TrainingData.query.filter_by(job_title=job_title, company_name=company_name).first()
 
-def create_chunks_and_embeddings_from_new_files(data_directory_path, processed_files):
-    data = ""
-    new_files = []
-    for filename in os.listdir(data_directory_path):
-        if filename.endswith(".txt") and filename not in processed_files:
-            new_files.append(filename)
-            with open(os.path.join(data_directory_path, filename), "r") as f:
-                data += f.read() + "\n"
-
-    if not new_files:
-        return None, None, None
+def create_chunks_and_embeddings_from_file(file_path):
+    logging.debug(f"Processing file: {file_path}")
+    with open(file_path, "r") as f:
+        data = f.read()
 
     chunk_size = 1000
     chunks = [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
     embeddings = embedder.embed_documents(chunks)
     embedding_array = np.array(embeddings).astype('float32')
-
-    return chunks, embedding_array, new_files
-
-def get_initial_question(training_data, industry):
-    chunks = training_data.data.split('\n')
-    embedding_array = np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536)
-    dimension = embedding_array.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(embedding_array)
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are an interview coach for a {training_data.job_title} at {training_data.company_name} in the {industry} industry."),
-        MessagesPlaceholder(variable_name="messages"),
-    ])
-
-    chain = RunnablePassthrough.assign(messages=lambda x: x["messages"]) | prompt | model
-
-    initial_prompt = "Ask a challenging interview question."
-    response = chain.invoke({"messages": [HumanMessage(content=initial_prompt)]})
-
-    return response.content
-
-def get_next_question(session_id, user_response):
-    session_history = get_session_history(session_id)
-    session_history.add_message(HumanMessage(content=user_response))
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an interview coach."),
-        MessagesPlaceholder(variable_name="messages"),
-        ("system", "Provide feedback on the user's answer and ask the next question."),
-    ])
-
-    chain = RunnablePassthrough.assign(messages=lambda x: session_history.messages) | prompt | model
-
-    response = chain.invoke({"messages": session_history.messages})
-    next_question = response.content
-    session_history.add_message(AIMessage(content=next_question))
-
-    return next_question
+    
+    logging.debug(f"Created {len(chunks)} chunks and embeddings")
+    
+    return chunks, embedding_array
 
 @app.route('/')
 def index():
@@ -152,26 +110,100 @@ def upload_training_data():
     company_name = request.form['company_name'].strip().lower()
     industry = request.form['industry'].strip().lower()
 
+    if not os.path.exists(file_path):
+        logging.error(f"Provided file path does not exist: {file_path}")
+        return render_template('add_training_data.html', job_title=job_title, company_name=company_name, industry=industry, message=f"Provided file path does not exist: {file_path}")
+
     training_data = load_training_data(job_title, company_name)
-    chunks, embedding_array, new_files = create_chunks_and_embeddings_from_new_files(file_path, [])
+    existing_files = training_data.processed_files.split(',') if training_data and training_data.processed_files else []
 
-    if training_data:
-        training_data.data += '\n' + '\n'.join(chunks)
-        training_data.embeddings = np.concatenate((np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536), embedding_array), axis=0).tobytes()
-        training_data.processed_files += ',' + ','.join(new_files)
-    else:
-        new_training_data = TrainingData(
-            job_title=job_title,
-            company_name=company_name,
-            data='\n'.join(chunks),
-            embeddings=embedding_array.tobytes(),
-            processed_files=','.join(new_files)
-        )
-        db.session.add(new_training_data)
+    new_files = []
+    for filename in os.listdir(file_path):
+        full_path = os.path.join(file_path, filename)
+        logging.debug(f"Checking file: {full_path}")
+        if filename.endswith(".txt") and filename not in existing_files:
+            chunks, embedding_array = create_chunks_and_embeddings_from_file(full_path)
+            new_files.append(filename)
 
+            if training_data:
+                logging.debug(f"Updating existing training data for {job_title} at {company_name}")
+                training_data.data += '\n' + '\n'.join(chunks)
+                existing_embeddings = np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536)
+                logging.debug(f"Existing embeddings shape: {existing_embeddings.shape}")
+                logging.debug(f"New embedding array shape: {embedding_array.shape}")
+                if embedding_array.size > 0:
+                    if len(embedding_array.shape) == 1:
+                        embedding_array = embedding_array.reshape(1, -1)
+                    training_data.embeddings = np.concatenate((existing_embeddings, embedding_array), axis=0).tobytes()
+                    logging.debug(f"Updated embeddings shape: {np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536).shape}")
+                training_data.processed_files += ',' + filename
+                logging.debug(f"Updated processed files: {training_data.processed_files}")
+            else:
+                logging.debug(f"Creating new training data for {job_title} at {company_name}")
+                new_training_data = TrainingData(
+                    job_title=job_title,
+                    company_name=company_name,
+                    data='\n'.join(chunks),
+                    embeddings=embedding_array.tobytes(),
+                    processed_files=filename
+                )
+                db.session.add(new_training_data)
+                training_data = new_training_data  # Set training_data for further operations
+                logging.debug(f"New training data created with ID: {new_training_data.id}")
+
+    logging.debug("Committing changes to the database...")
     db.session.commit()
+    logging.debug("Changes committed to the database.")
+
+    # Verify the data after commit
+    updated_training_data = load_training_data(job_title, company_name)
+    logging.debug(f"Post-commit Training Data ID: {updated_training_data.id}")
+    logging.debug(f"Post-commit Training Data Processed Files: {updated_training_data.processed_files}")
 
     return redirect(url_for('start_interview_without_adding', job_title=job_title, company_name=company_name, industry=industry))
+
+
+def get_initial_question(training_data, industry):
+    chunks = training_data.data.split('\n')
+    embedding_array = np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536)
+    logging.debug(f"Loaded {len(chunks)} chunks and {embedding_array.shape[0]} embeddings for FAISS index")
+    dimension = embedding_array.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(embedding_array)
+    logging.debug("FAISS index created and embeddings added")
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", f"You are an interview coach for a {training_data.job_title} at {training_data.company_name} in the {industry} industry."),
+        MessagesPlaceholder(variable_name="messages"),
+    ])
+
+    chain = RunnablePassthrough.assign(messages=lambda x: x["messages"]) | prompt | model
+
+    initial_prompt = "Ask a challenging interview question."
+    response = chain.invoke({"messages": [HumanMessage(content=initial_prompt)]})
+    logging.debug(f"Initial interview question: {response.content}")
+
+    return response.content
+
+def get_next_question(session_id, user_response):
+    session_history = get_session_history(session_id)
+    session_history.add_message(HumanMessage(content=user_response))
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an interview coach."),
+        MessagesPlaceholder(variable_name="messages"),
+        ("system", "Provide feedback on the user's answer and ask the next question."),
+    ])
+
+    chain = RunnablePassthrough.assign(messages=lambda x: session_history.messages) | prompt | model
+
+    response = chain.invoke({"messages": session_history.messages})
+    next_question = response.content
+    session_history.add_message(AIMessage(content=next_question))
+
+    logging.debug(f"Next interview question: {next_question}")
+
+    return next_question
 
 @app.route('/continue_interview', methods=['POST'])
 def continue_interview():
