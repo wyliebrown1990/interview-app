@@ -1,0 +1,24 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+exporters:
+  otlphttp:
+    endpoint: "https://157526203278.collect.observeinc.com/v2/otel"
+    headers:
+      authorization: "Bearer ds1LVAKjxlam4PUjKapg:pYkGnQ5E1ZEiKiuMikkSpW8tM_Uqut8X"
+      content-type: "application/x-protobuf"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlphttp]
+    metrics:
+      receivers: [otlp]
+      exporters: [otlphttp]
+    logs:
+      receivers: [otlp]
+      exporters: [otlphttp]

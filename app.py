@@ -1,18 +1,27 @@
 import os
-import logging
-from flask import Flask, render_template, request, jsonify, url_for, redirect
-from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
+import logging
+from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.instrumentation.flask import FlaskInstrumentor
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+import numpy as np
+import faiss
 from langchain_openai import ChatOpenAI
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough
-from sqlalchemy import select
-import faiss
-import numpy as np
+#from langchain_core.runnables import RunnablePassthrough
 
+"""Here begins debug, environment, database and openai initializations
+Don't change"""
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
@@ -25,28 +34,57 @@ database_url = os.getenv('DATABASE_URL')
 if not database_url:
     raise ValueError("DATABASE_URL is not set in the environment variables")
 
-# Initialize the Flask application
+# Initialize Flask app
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-app.config['SECRET_KEY'] = os.urandom(24)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Initialize the database
+# Initialize SQLAlchemy
 db = SQLAlchemy(app)
 
 # Define the database model
 class TrainingData(db.Model):
+    __tablename__ = 'training_data'
     id = db.Column(db.Integer, primary_key=True)
-    job_title = db.Column(db.String, nullable=False)
-    company_name = db.Column(db.String, nullable=False)
+    job_title = db.Column(db.String(255), nullable=False)
+    company_name = db.Column(db.String(255), nullable=False)
     data = db.Column(db.Text, nullable=False)
-    embeddings = db.Column(db.LargeBinary)
-    processed_files = db.Column(db.Text)
+    embeddings = db.Column(db.LargeBinary, nullable=True)
+    processed_files = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
 
 # Initialize the OpenAI chat model and embeddings model
 # Here you can change the model to improve results or lower per token cost
 model = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key)
 embedder = OpenAIEmbeddings(openai_api_key=api_key)
+
+# In-memory store for chat histories. This allows the chat model to reference previous disucssions. 
+chat_histories = {}
+
+"""Here begins OpenTel setup
+Only make changes here for otel set up
+
+# OpenTelemetry setup
+resource = Resource(attributes={"service.name": "interview-app"})
+trace.set_tracer_provider(TracerProvider(resource=resource))
+tracer = trace.get_tracer(__name__)
+
+otlp_exporter = OTLPSpanExporter(endpoint="0.0.0.0:4317", insecure=True)
+span_processor = BatchSpanProcessor(otlp_exporter)
+trace.get_tracer_provider().add_span_processor(span_processor)
+
+console_exporter = ConsoleSpanExporter()
+trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(console_exporter))
+
+FlaskInstrumentor().instrument_app(app)
+LoggingInstrumentor().instrument()
+RequestsInstrumentor().instrument()
+
+# Initialize the OpenAI chat model and embeddings model
+# Here you can change the model to improve results or lower per token cost
+model = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key)
+embedder = OpenAIEmbeddings(openai_api_key=api_key)
+"""
 
 # In-memory store for chat histories. This allows the chat model to reference previous disucssions. 
 chat_histories = {}
@@ -201,18 +239,17 @@ processed_files: Comma-separated list of file names that have been processed.
 """
 @app.route('/upload_training_data', methods=['POST'])
 def upload_training_data():
-    # Retrieve form data: file path, job title, company name, and industry.
     file_path = request.form['file_path']
     job_title = request.form['job_title'].strip().lower()
     company_name = request.form['company_name'].strip().lower()
     industry = request.form['industry'].strip().lower()
 
-# Check if the provided file path exists.
+    logging.debug(f"Received upload request for job_title={job_title}, company_name={company_name}, industry={industry}")
+
     if not os.path.exists(file_path):
         logging.error(f"Provided file path does not exist: {file_path}")
         return render_template('add_training_data.html', job_title=job_title, company_name=company_name, industry=industry, message=f"Provided file path does not exist: {file_path}")
 
-# Load existing training data from the database.
     training_data = load_training_data(job_title, company_name)
     existing_files = training_data.processed_files.split(',') if training_data and training_data.processed_files else []
 
@@ -221,12 +258,10 @@ def upload_training_data():
         full_path = os.path.join(file_path, filename)
         logging.debug(f"Checking file: {full_path}")
         if filename.endswith(".txt") and filename not in existing_files:
-            # Process the file and create chunks and embeddings.
             chunks, embedding_array = create_chunks_and_embeddings_from_file(full_path)
             new_files.append(filename)
 
             if training_data:
-                # Update existing training data.
                 logging.debug(f"Updating existing training data for {job_title} at {company_name}")
                 training_data.data += '\n' + '\n'.join(chunks)
                 existing_embeddings = np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536)
@@ -240,7 +275,6 @@ def upload_training_data():
                 training_data.processed_files += ',' + filename
                 logging.debug(f"Updated processed files: {training_data.processed_files}")
             else:
-                # Create new training data.
                 logging.debug(f"Creating new training data for {job_title} at {company_name}")
                 new_training_data = TrainingData(
                     job_title=job_title,
@@ -253,9 +287,21 @@ def upload_training_data():
                 training_data = new_training_data  # Set training_data for further operations
                 logging.debug(f"New training data created with ID: {new_training_data.id}")
 
-    logging.debug("Committing changes to the database...")
-    db.session.commit()
-    logging.debug("Changes committed to the database.")
+    try:
+        logging.debug("Committing changes to the database...")
+        db.session.commit()
+        logging.debug("Changes committed to the database.")
+    except Exception as e:
+        logging.error(f"Error committing changes to the database: {e}")
+        db.session.rollback()
+        return render_template('add_training_data.html', job_title=job_title, company_name=company_name, industry=industry, message=f"Error saving training data: {e}")
+
+    # Verify the data after commit
+    updated_training_data = load_training_data(job_title, company_name)
+    logging.debug(f"Post-commit Training Data ID: {updated_training_data.id}")
+    logging.debug(f"Post-commit Training Data Processed Files: {updated_training_data.processed_files}")
+
+    return redirect(url_for('start_interview_without_adding', job_title=job_title, company_name=company_name, industry=industry))
 
     # Verify the data after commit
     updated_training_data = load_training_data(job_title, company_name)
@@ -292,7 +338,7 @@ def get_initial_question(training_data, industry):
     ])
 
 # Create a chain to process the initial prompt.
-    chain = RunnablePassthrough.assign(messages=lambda x: x["messages"]) | prompt | model
+    chain = prompt | model
 
     initial_prompt = "Ask a challenging interview question."
     response = chain.invoke({"messages": [HumanMessage(content=initial_prompt)]})
@@ -323,7 +369,7 @@ def get_next_question(session_id, user_response):
     ])
 
 # Create a chain to process the user's response and generate the next question.
-    chain = RunnablePassthrough.assign(messages=lambda x: session_history.messages) | prompt | model
+    chain = prompt | model
 
 # Generate the next interview question.
     response = chain.invoke({"messages": session_history.messages})
