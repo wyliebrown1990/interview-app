@@ -2,15 +2,10 @@ import os
 from dotenv import load_dotenv
 import logging
 from flask import Flask, render_template, request, redirect, url_for, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from opentelemetry.instrumentation.logging import LoggingInstrumentor
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from sqlalchemy import create_engine, Column, Integer, String, Date, Text, LargeBinary, TIMESTAMP
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import func
 import numpy as np
 import faiss
 from langchain_openai import ChatOpenAI
@@ -36,22 +31,25 @@ if not database_url:
 
 # Initialize Flask app
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize SQLAlchemy
-db = SQLAlchemy(app)
+engine = create_engine(database_url)
+Session = sessionmaker(bind=engine)
+session = Session()
+Base = declarative_base()
 
 # Define the database model
-class TrainingData(db.Model):
+class TrainingData(Base):
     __tablename__ = 'training_data'
-    id = db.Column(db.Integer, primary_key=True)
-    job_title = db.Column(db.String(255), nullable=False)
-    company_name = db.Column(db.String(255), nullable=False)
-    data = db.Column(db.Text, nullable=False)
-    embeddings = db.Column(db.LargeBinary, nullable=True)
-    processed_files = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    id = Column(Integer, primary_key=True)
+    job_title = Column(String(255), nullable=False)
+    company_name = Column(String(255), nullable=False)
+    data = Column(Text, nullable=False)
+    embeddings = Column(LargeBinary, nullable=True)
+    processed_files = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+Base.metadata.create_all(engine)
 
 # Initialize the OpenAI chat model and embeddings model
 # Here you can change the model to improve results or lower per token cost
@@ -60,25 +58,6 @@ embedder = OpenAIEmbeddings(openai_api_key=api_key)
 
 # In-memory store for chat histories. This allows the chat model to reference previous disucssions. 
 chat_histories = {}
-
-"""Here begins OpenTel setup
-Only make changes here for otel set up
-"""
-# OpenTelemetry setup
-resource = Resource(attributes={"service.name": "interview-app"})
-trace.set_tracer_provider(TracerProvider(resource=resource))
-tracer = trace.get_tracer(__name__)
-
-otlp_exporter = OTLPSpanExporter(endpoint="0.0.0.0:4317", insecure=True)
-span_processor = BatchSpanProcessor(otlp_exporter)
-trace.get_tracer_provider().add_span_processor(span_processor)
-
-console_exporter = ConsoleSpanExporter()
-trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(console_exporter))
-
-FlaskInstrumentor().instrument_app(app)
-LoggingInstrumentor().instrument()
-RequestsInstrumentor().instrument()
 
 # Initialize the OpenAI chat model and embeddings model
 # Here you can change the model to improve results or lower per token cost
@@ -116,7 +95,8 @@ def get_session_history(session_id: str) -> ChatMessageHistory:
     TrainingData: The training data record from the database that matches the given job title and company name.
     """
 def load_training_data(job_title, company_name):
-    return TrainingData.query.filter_by(job_title=job_title, company_name=company_name).first()
+    return session.query(TrainingData).filter_by(job_title=job_title, company_name=company_name).first()
+
 """
     Read a text file, split its content into chunks, and generate embeddings for each chunk.
 
@@ -282,27 +262,19 @@ def upload_training_data():
                     embeddings=embedding_array.tobytes(),
                     processed_files=filename
                 )
-                db.session.add(new_training_data)
-                training_data = new_training_data  # Set training_data for further operations
+                session.add(new_training_data)
+                training_data = new_training_data
                 logging.debug(f"New training data created with ID: {new_training_data.id}")
 
     try:
         logging.debug("Committing changes to the database...")
-        db.session.commit()
+        session.commit()
         logging.debug("Changes committed to the database.")
     except Exception as e:
         logging.error(f"Error committing changes to the database: {e}")
-        db.session.rollback()
+        session.rollback()
         return render_template('add_training_data.html', job_title=job_title, company_name=company_name, industry=industry, message=f"Error saving training data: {e}")
 
-    # Verify the data after commit
-    updated_training_data = load_training_data(job_title, company_name)
-    logging.debug(f"Post-commit Training Data ID: {updated_training_data.id}")
-    logging.debug(f"Post-commit Training Data Processed Files: {updated_training_data.processed_files}")
-
-    return redirect(url_for('start_interview_without_adding', job_title=job_title, company_name=company_name, industry=industry))
-
-    # Verify the data after commit
     updated_training_data = load_training_data(job_title, company_name)
     logging.debug(f"Post-commit Training Data ID: {updated_training_data.id}")
     logging.debug(f"Post-commit Training Data Processed Files: {updated_training_data.processed_files}")
@@ -401,7 +373,4 @@ def continue_interview():
     return jsonify({'next_question': next_question})
 
 if __name__ == "__main__":
-    # Ensure the database tables are created and run the Flask application.
-    with app.app_context():
-        db.create_all()
     app.run(debug=True, use_reloader=False)
