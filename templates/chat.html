@@ -26,6 +26,12 @@
                 </div>
             `;
             document.getElementById('user_response').value = '';  // Clear the input field
+            document.getElementById('user_response').style.height = 'auto';  // Reset height
+        }
+
+        function adjustTextareaHeight(element) {
+            element.style.height = 'auto';
+            element.style.height = (element.scrollHeight) + 'px';
         }
     </script>
 </head>
@@ -42,7 +48,7 @@
     <form onsubmit="fetchNextQuestion(event);">
         <input type="hidden" id="session_id" value="{{ session_id }}">
         <label for="user_response">Your Response:</label>
-        <input type="text" id="user_response" required>
+        <textarea id="user_response" name="user_response" rows="5" style="width: 100%;" required oninput="adjustTextareaHeight(this)"></textarea>
         <button type="submit">Send</button>
     </form>
 </body>

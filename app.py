@@ -1,18 +1,22 @@
 import os
-import logging
-from flask import Flask, render_template, request, jsonify, url_for, redirect
-from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
+import logging
+from flask import Flask, render_template, request, redirect, url_for, jsonify
+from sqlalchemy import create_engine, Column, Integer, String, Date, Text, LargeBinary, TIMESTAMP
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import func
+import numpy as np
+import faiss
 from langchain_openai import ChatOpenAI
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough
-from sqlalchemy import select
-import faiss
-import numpy as np
+#from langchain_core.runnables import RunnablePassthrough
 
+"""Here begins debug, environment, database and openai initializations
+Don't change"""
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
@@ -25,23 +29,35 @@ database_url = os.getenv('DATABASE_URL')
 if not database_url:
     raise ValueError("DATABASE_URL is not set in the environment variables")
 
-# Initialize the Flask application
+# Initialize Flask app
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-app.config['SECRET_KEY'] = os.urandom(24)
 
-# Initialize the database
-db = SQLAlchemy(app)
+# Initialize SQLAlchemy
+engine = create_engine(database_url)
+Session = sessionmaker(bind=engine)
+session = Session()
+Base = declarative_base()
 
 # Define the database model
-class TrainingData(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    job_title = db.Column(db.String, nullable=False)
-    company_name = db.Column(db.String, nullable=False)
-    data = db.Column(db.Text, nullable=False)
-    embeddings = db.Column(db.LargeBinary)
-    processed_files = db.Column(db.Text)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+class TrainingData(Base):
+    __tablename__ = 'training_data'
+    id = Column(Integer, primary_key=True)
+    job_title = Column(String(255), nullable=False)
+    company_name = Column(String(255), nullable=False)
+    data = Column(Text, nullable=False)
+    embeddings = Column(LargeBinary, nullable=True)
+    processed_files = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+Base.metadata.create_all(engine)
+
+# Initialize the OpenAI chat model and embeddings model
+# Here you can change the model to improve results or lower per token cost
+model = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key)
+embedder = OpenAIEmbeddings(openai_api_key=api_key)
+
+# In-memory store for chat histories. This allows the chat model to reference previous disucssions. 
+chat_histories = {}
 
 # Initialize the OpenAI chat model and embeddings model
 # Here you can change the model to improve results or lower per token cost
@@ -79,7 +95,8 @@ def get_session_history(session_id: str) -> ChatMessageHistory:
     TrainingData: The training data record from the database that matches the given job title and company name.
     """
 def load_training_data(job_title, company_name):
-    return TrainingData.query.filter_by(job_title=job_title, company_name=company_name).first()
+    return session.query(TrainingData).filter_by(job_title=job_title, company_name=company_name).first()
+
 """
     Read a text file, split its content into chunks, and generate embeddings for each chunk.
 
@@ -201,18 +218,17 @@ processed_files: Comma-separated list of file names that have been processed.
 """
 @app.route('/upload_training_data', methods=['POST'])
 def upload_training_data():
-    # Retrieve form data: file path, job title, company name, and industry.
     file_path = request.form['file_path']
     job_title = request.form['job_title'].strip().lower()
     company_name = request.form['company_name'].strip().lower()
     industry = request.form['industry'].strip().lower()
 
-# Check if the provided file path exists.
+    logging.debug(f"Received upload request for job_title={job_title}, company_name={company_name}, industry={industry}")
+
     if not os.path.exists(file_path):
         logging.error(f"Provided file path does not exist: {file_path}")
         return render_template('add_training_data.html', job_title=job_title, company_name=company_name, industry=industry, message=f"Provided file path does not exist: {file_path}")
 
-# Load existing training data from the database.
     training_data = load_training_data(job_title, company_name)
     existing_files = training_data.processed_files.split(',') if training_data and training_data.processed_files else []
 
@@ -221,12 +237,10 @@ def upload_training_data():
         full_path = os.path.join(file_path, filename)
         logging.debug(f"Checking file: {full_path}")
         if filename.endswith(".txt") and filename not in existing_files:
-            # Process the file and create chunks and embeddings.
             chunks, embedding_array = create_chunks_and_embeddings_from_file(full_path)
             new_files.append(filename)
 
             if training_data:
-                # Update existing training data.
                 logging.debug(f"Updating existing training data for {job_title} at {company_name}")
                 training_data.data += '\n' + '\n'.join(chunks)
                 existing_embeddings = np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536)
@@ -240,7 +254,6 @@ def upload_training_data():
                 training_data.processed_files += ',' + filename
                 logging.debug(f"Updated processed files: {training_data.processed_files}")
             else:
-                # Create new training data.
                 logging.debug(f"Creating new training data for {job_title} at {company_name}")
                 new_training_data = TrainingData(
                     job_title=job_title,
@@ -249,15 +262,19 @@ def upload_training_data():
                     embeddings=embedding_array.tobytes(),
                     processed_files=filename
                 )
-                db.session.add(new_training_data)
-                training_data = new_training_data  # Set training_data for further operations
+                session.add(new_training_data)
+                training_data = new_training_data
                 logging.debug(f"New training data created with ID: {new_training_data.id}")
 
-    logging.debug("Committing changes to the database...")
-    db.session.commit()
-    logging.debug("Changes committed to the database.")
+    try:
+        logging.debug("Committing changes to the database...")
+        session.commit()
+        logging.debug("Changes committed to the database.")
+    except Exception as e:
+        logging.error(f"Error committing changes to the database: {e}")
+        session.rollback()
+        return render_template('add_training_data.html', job_title=job_title, company_name=company_name, industry=industry, message=f"Error saving training data: {e}")
 
-    # Verify the data after commit
     updated_training_data = load_training_data(job_title, company_name)
     logging.debug(f"Post-commit Training Data ID: {updated_training_data.id}")
     logging.debug(f"Post-commit Training Data Processed Files: {updated_training_data.processed_files}")
@@ -287,12 +304,12 @@ def get_initial_question(training_data, industry):
 
 # Define the prompt template for the initial interview question. This is where you can really optimize output.
     prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are an interview coach for a {training_data.job_title} at {training_data.company_name} in the {industry} industry."),
+        ("system", f"I want you to conduct a real life job interview with me where you ask me real interview questions I would get as a {training_data.job_title} at {training_data.company_name} in the {industry} industry. Youre questions should test my knowledge of the job role and company and challenge me to give concise and relevant answers."),
         MessagesPlaceholder(variable_name="messages"),
     ])
 
 # Create a chain to process the initial prompt.
-    chain = RunnablePassthrough.assign(messages=lambda x: x["messages"]) | prompt | model
+    chain = prompt | model
 
     initial_prompt = "Ask a challenging interview question."
     response = chain.invoke({"messages": [HumanMessage(content=initial_prompt)]})
@@ -317,13 +334,13 @@ def get_next_question(session_id, user_response):
 
 # Define the prompt template for the next interview question. This is where you can really optimize output. 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an interview coach."),
+        ("system", "You are the world's best interview coach. People looking to advance their careers and perfect their interview answers come to you for critical feedback on their ability to answer interview questions as best as possible."),
         MessagesPlaceholder(variable_name="messages"),
-        ("system", "Provide feedback on the user's answer and ask the next question."),
+        ("system", "Provide feedback on the user's answer. Be very critical of their ability to provide concise and accurate answers. Give them a rating between 0 - 10 on how good their answer was based on how you would expect the world's best job interviewers to perform. After your feedback if you felt the answer given was incomplete then ask another question that goes deeper and more specific on your last question. If the answer is satisfactory to the last question then please ask a new question that is different than any questions you've asked before."),
     ])
 
 # Create a chain to process the user's response and generate the next question.
-    chain = RunnablePassthrough.assign(messages=lambda x: session_history.messages) | prompt | model
+    chain = prompt | model
 
 # Generate the next interview question.
     response = chain.invoke({"messages": session_history.messages})
@@ -356,7 +373,4 @@ def continue_interview():
     return jsonify({'next_question': next_question})
 
 if __name__ == "__main__":
-    # Ensure the database tables are created and run the Flask application.
-    with app.app_context():
-        db.create_all()
     app.run(debug=True, use_reloader=False)
