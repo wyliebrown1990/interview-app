@@ -63,7 +63,7 @@ chat_histories = {}
 
 """Here begins OpenTel setup
 Only make changes here for otel set up
-
+"""
 # OpenTelemetry setup
 resource = Resource(attributes={"service.name": "interview-app"})
 trace.set_tracer_provider(TracerProvider(resource=resource))
@@ -84,7 +84,6 @@ RequestsInstrumentor().instrument()
 # Here you can change the model to improve results or lower per token cost
 model = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key)
 embedder = OpenAIEmbeddings(openai_api_key=api_key)
-"""
 
 # In-memory store for chat histories. This allows the chat model to reference previous disucssions. 
 chat_histories = {}
