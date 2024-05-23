@@ -333,7 +333,7 @@ def get_initial_question(training_data, industry):
 
 # Define the prompt template for the initial interview question. This is where you can really optimize output.
     prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are an interview coach for a {training_data.job_title} at {training_data.company_name} in the {industry} industry."),
+        ("system", f"I want you to conduct a real life job interview with me where you ask me real interview questions I would get as a {training_data.job_title} at {training_data.company_name} in the {industry} industry. Youre questions should test my knowledge of the job role and company and challenge me to give concise and relevant answers."),
         MessagesPlaceholder(variable_name="messages"),
     ])
 
@@ -363,9 +363,9 @@ def get_next_question(session_id, user_response):
 
 # Define the prompt template for the next interview question. This is where you can really optimize output. 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an interview coach."),
+        ("system", "You are the world's best interview coach. People looking to advance their careers and perfect their interview answers come to you for critical feedback on their ability to answer interview questions as best as possible."),
         MessagesPlaceholder(variable_name="messages"),
-        ("system", "Provide feedback on the user's answer and ask the next question."),
+        ("system", "Provide feedback on the user's answer. Be very critical of their ability to provide concise and accurate answers. Give them a rating between 0 - 10 on how good their answer was based on how you would expect the world's best job interviewers to perform. After your feedback if you felt the answer given was incomplete then ask another question that goes deeper and more specific on your last question. If the answer is satisfactory to the last question then please ask a new question that is different than any questions you've asked before."),
     ])
 
 # Create a chain to process the user's response and generate the next question.
