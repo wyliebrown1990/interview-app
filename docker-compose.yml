@@ -5,6 +5,8 @@ services:
       - "5005:5000"
     environment:
       DATABASE_URL: "postgresql://wyliebrown:test123@postgres/interview_bot"
+    volumes:
+      - ./uploads:/code/uploads
     depends_on:
       - postgres
 
@@ -20,27 +22,5 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./initdb:/docker-entrypoint-initdb.d
 
-#will add retool later
-  #retool:
-    #image: tryretool/backend:3.33.3-stable
-    #ports:
-      #- "3000:3000"
-    #env_file:
-      #- ./retool-onpremise-master/docker.env
-    #depends_on:
-      #- retool_db
-
-  #retool_db:
-    #image: postgres:13
-    #environment:
-      #POSTGRES_DB: retool
-      #POSTGRES_USER: retool
-      #POSTGRES_PASSWORD: retool
-    #volumes:
-      #- retool-db-data:/var/lib/postgresql/data
-    #ports:
-      #- "5433:5432"
-
 volumes:
   pgdata:
-  #retool-db-data:

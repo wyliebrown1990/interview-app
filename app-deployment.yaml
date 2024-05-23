@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interview-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: interview-app
+  template:
+    metadata:
+      labels:
+        app: interview-app
+    spec:
+      containers:
+      - name: interview-app
+        image: interview-app:minikube
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://wyliebrown:test123@postgres/interview_bot"
+        ports:
+        - containerPort: 5000
+        volumeMounts:
+        - mountPath: /code/uploads
+          name: uploads-storage
+      volumes:
+      - name: uploads-storage
+        persistentVolumeClaim:
+          claimName: uploads-pvc

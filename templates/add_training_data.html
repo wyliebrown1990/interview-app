@@ -11,14 +11,14 @@
        <h1>Add Training Data</h1>
    </header>
    <p>{{ message }}</p>
-   <form action="/upload_training_data" method="POST" enctype="multipart/form-data">
-       <input type="hidden" name="job_title" value="{{ job_title }}">
-       <input type="hidden" name="company_name" value="{{ company_name }}">
-       <input type="hidden" name="industry" value="{{ industry }}">
-       <label for="file">File:</label>
-       <input type="file" id="file" name="file" required><br>
-       <button type="submit">Upload</button>
-   </form>
+<form action="/upload_training_data" method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="job_title" value="{{ job_title }}">
+    <input type="hidden" name="company_name" value="{{ company_name }}">
+    <input type="hidden" name="industry" value="{{ industry }}">
+    <label for="files">Files:</label>
+    <input type="file" id="files" name="files" multiple required><br>
+    <button type="submit">Upload</button>
+    </form>
    <form action="{{ skip_url }}" method="GET">
        <input type="hidden" name="job_title" value="{{ job_title }}">
        <input type="hidden" name="company_name" value="{{ company_name }}">
