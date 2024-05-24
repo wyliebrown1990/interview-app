@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+spec:
+  ports:
+  - name: grpc        # Name for the gRPC port
+    port: 4317
+    targetPort: 4317
+  - name: http        # Name for the HTTP port
+    port: 4318
+    targetPort: 4318
+  selector:
+    app: otel-collector
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+      - name: otel-collector
+        image: wyliebrown1990/custom-otel-collector:0.39.0
+        args: ["--config=/etc/otel-collector-config.yaml"]
+        ports:
+        - containerPort: 4317
+        - containerPort: 4318
+        volumeMounts:
+        - mountPath: /etc/otel-collector-config.yaml
+          subPath: config.yaml
+          name: config-volume
+      volumes:
+      - name: config-volume
+        configMap:
+          name: otel-collector-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+          http:
+    exporters:
+      otlphttp:
+        endpoint: "https://157526203278.collect.observeinc.com/v2/otel"
+        headers:
+          authorization: "Bearer ds1LVAKjxlam4PUjKapg:pYkGnQ5E1ZEiKiuMikkSpW8tM_Uqut8X"
+          content-type: "application/x-protobuf"
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [otlphttp]
+        metrics:
+          receivers: [otlp]
+          exporters: [otlphttp]
+        logs:
+          receivers: [otlp]
+          exporters: [otlphttp]

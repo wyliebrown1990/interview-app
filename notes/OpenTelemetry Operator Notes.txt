@@ -1,0 +1,105 @@
+OpenTelemetry Operator Notes
+
+kubectl apply -f https://github.com/jetstack/cert-manager/releases/latest/download/cert-manager.yaml
+
+check:
+kubectl get pods --namespace cert-manager
+
+
+kubectl apply -f https://github.com/open-telemetry/opentelemetry-operator/releases/latest/download/opentelemetry-operator.yaml
+
+Check:
+kubectl get pods -n opentelemetry-operator-system
+
+Run code in terminal: 
+kubectl apply -f - <<EOF
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: simplest
+spec:
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc: {}
+          http: {}
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 15
+      batch:
+        send_batch_size: 10000
+        timeout: 10s
+
+    exporters:
+      logging: {}
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [logging]
+EOF
+
+Check: 
+kubectl get pods
+
+Updated app-deployment Yaml 
+
+Then redeployed: 
+kubectl apply -f <your-deployment-file.yaml>
+
+kubectl get pods --all-namespaces
+
+kubectl get pod simplest-collector-67b66549bb-hz22g -n default --show-labels
+
+NAME                                  READY   STATUS    RESTARTS   AGE   LABELS
+simplest-collector-67b66549bb-hz22g   1/1     Running   0          16m   app.kubernetes.io/component=opentelemetry-collector,app.kubernetes.io/instance=default.simplest,app.kubernetes.io/managed-by=opentelemetry-operator,app.kubernetes.io/name=simplest-collector,app.kubernetes.io/part-of=opentelemetry,app.kubernetes.io/version=latest,pod-template-hash=67b66549bb
+
+kubectl logs simplest-collector-789b46cf64-4dr4m -n default
+
+Updated app.py code with instrumentation
+
+docker build -t interview-app:minikube .
+
+NEXT STEPPPP:
+
+docker tag interview-app:minikube wyliebrown1990/interview-app:observe
+docker push wyliebrown1990/interview-app:observe
+
+kubectl apply -f app-deployment.yaml
+
+kubectl logs interview-app-94c5c755c-gf527 -n default
+
+docker build -t interview-app:observe .
+
+docker build -t wyliebrown1990/interview-app:observe .
+docker push wyliebrown1990/interview-app:observe
+kubectl apply -f app-deployment.yaml
+
+kubectl logs interview-app-94c5c755c-8vr76  -n default
+
+minikube stop
+minikube delete
+Start minikube with the Driver Docker: 
+minikube start --driver=docker
+
+Enable Minikube Docker Environment:
+This allows you to use the Docker daemon inside Minikube.
+eval $(minikube docker-env)
+
+docker push interview-app:observe
+
+
+No traces showing up in Observe Dachboard so troubleshootinng steps: 
+kubectl get opentelemetrycollectors observe-collector -o yaml
+
+Check if pod can connect with observe: 
+
+kubectl logs observe-collector-collector-744bb56879-hc2ts
+
+35, 
+
