@@ -6,6 +6,38 @@
     <title>Interview Chat</title>
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/styles.css') }}">
     <script>
+        let mediaRecorder;
+        let audioChunks = [];
+
+        async function startRecording() {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'audio.webm');
+
+                const response = await fetch('/upload_audio', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                document.getElementById('transcription').innerText = data.transcription;
+            };
+
+            mediaRecorder.start();
+        }
+
+        function stopRecording() {
+            mediaRecorder.stop();
+            audioChunks = [];
+        }
+
         async function fetchNextQuestion(event) {
             event.preventDefault();  // Prevent form submission
             const userResponse = document.getElementById('user_response').value;
@@ -50,6 +82,9 @@
         <label for="user_response">Your Response:</label>
         <textarea id="user_response" name="user_response" rows="5" style="width: 100%;" required oninput="adjustTextareaHeight(this)"></textarea>
         <button type="submit">Send</button>
+        <button type="button" onclick="startRecording()">Start Recording</button>
+        <button type="button" onclick="stopRecording()">Stop Recording</button>
+        <p id="transcription"></p>
     </form>
 </body>
 </html>

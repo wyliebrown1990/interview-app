@@ -26,6 +26,9 @@ from opentelemetry.sdk.trace.export import (
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+#audio transcription
+from pydub import AudioSegment
+import whisper
 
 #start otel config
 
@@ -81,14 +84,24 @@ Base = declarative_base()
 
 # Define the database model
 class TrainingData(Base):
-   __tablename__ = 'training_data'
-   id = Column(Integer, primary_key=True)
-   job_title = Column(String(255), nullable=False)
-   company_name = Column(String(255), nullable=False)
-   data = Column(Text, nullable=False)
-   embeddings = Column(LargeBinary, nullable=True)
-   processed_files = Column(Text, nullable=True)
-   created_at = Column(TIMESTAMP, server_default=func.now())
+    __tablename__ = 'training_data'
+    id = Column(Integer, primary_key=True)
+    job_title = Column(String(255), nullable=False)
+    company_name = Column(String(255), nullable=False)
+    data = Column(Text, nullable=False)
+    embeddings = Column(LargeBinary, nullable=True)
+    processed_files = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+class InterviewResponse(Base):
+    __tablename__ = 'interview_responses'
+    id = Column(Integer, primary_key=True)
+    job_title = Column(String(255), nullable=False)
+    company_name = Column(String(255), nullable=False)
+    industry = Column(String(255), nullable=False)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    timestamp = Column(TIMESTAMP, server_default=func.now())
 
 Base.metadata.create_all(engine)
 
@@ -273,6 +286,65 @@ def continue_interview():
         next_question = get_next_question(session_id, user_response)
 
         return jsonify({'next_question': next_question})
+    
+@app.route('/submit_answer', methods=['POST'])
+def submit_answer():
+    with tracer.start_as_current_span("submit_answer") as span:
+        try:
+            data = request.get_json()
+            job_title = data.get('job_title')
+            company_name = data.get('company_name')
+            industry = data.get('industry')
+            question = data.get('question')
+            answer = data.get('answer')
+
+            new_response = InterviewResponse(
+                job_title=job_title,
+                company_name=company_name,
+                industry=industry,
+                question=question,
+                answer=answer
+            )
+            session.add(new_response)
+            session.commit()
+
+            return jsonify({'message': 'Answer saved successfully'})
+        except Exception as e:
+            logging.error(f"Error in submit_answer: {e}")
+            span.set_status(StatusCode.ERROR, str(e))
+            return jsonify({'message': f"An error occurred: {e}"}), 500
+
+@app.route('/upload_audio', methods=['POST'])
+def upload_audio():
+    with tracer.start_as_current_span("upload_audio") as span:
+        try:
+            if 'file' not in request.files:
+                return jsonify({'message': 'No file part'}), 400
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({'message': 'No selected file'}), 400
+            if file and file.filename.endswith('.webm'):
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+
+                # Convert audio to WAV format for Whisper
+                audio = AudioSegment.from_file(file_path)
+                wav_path = os.path.join(app.config['UPLOAD_FOLDER'], 'audio.wav')
+                audio.export(wav_path, format="wav")
+
+                # Transcribe using Whisper
+                model = whisper.load_model("base")
+                result = model.transcribe(wav_path)
+
+                return jsonify({'transcription': result['text']})
+            else:
+                return jsonify({'message': 'Unsupported file format'}), 400
+        except Exception as e:
+            logging.error(f"Error in upload_audio: {e}")
+            span.set_status(StatusCode.ERROR, str(e))
+            return jsonify({'message': f"An error occurred: {e}"}), 500
+
 
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=False)

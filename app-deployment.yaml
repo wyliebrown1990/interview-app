@@ -26,7 +26,7 @@ spec:
     spec:
       containers:
       - name: interview-app
-        image: wyliebrown1990/interview-app:observe
+        image: wyliebrown1990/interview-app:1.3
         ports:
         - containerPort: 5000
         env:
