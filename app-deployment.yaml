@@ -1,3 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: interview-app
+spec:
+  selector:
+    app: interview-app
+  ports:
+  - protocol: TCP
+    port: 5000
+    targetPort: 5000
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,15 +26,17 @@ spec:
     spec:
       containers:
       - name: interview-app
-        image: interview-app:minikube
+        image: wyliebrown1990/interview-app:observe
+        ports:
+        - containerPort: 5000
         env:
         - name: DATABASE_URL
           value: "postgresql://wyliebrown:test123@postgres/interview_bot"
-        ports:
-        - containerPort: 5000
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector:4317"
         volumeMounts:
-        - mountPath: /code/uploads
-          name: uploads-storage
+        - name: uploads-storage
+          mountPath: /code/uploads
       volumes:
       - name: uploads-storage
         persistentVolumeClaim:

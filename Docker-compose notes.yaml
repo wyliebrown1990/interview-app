@@ -1,0 +1,36 @@
+Docker-compose notes
+
+STEPS TO DOCKER OTEL, POSTGRES and APP:
+docker buildx create --use --name multiarch-builder
+
+docker buildx inspect --bootstrap
+
+docker buildx build --platform linux/amd64,linux/arm64 -t wyliebrown1990/interview-app:latest --push .
+docker buildx imagetools inspect wyliebrown1990/interview-app:latest
+
+docker-compose up -d
+docker-compose down
+
+If rebuilding image: 
+docker-compose build
+
+Had to clean environment:
+docker-compose down --rmi all -v
+docker system prune -a --volumes
+
+docker-compose build --no-cache
+docker-compose up
+
+docker volume ls  
+docker volume rm interview_app_pgdata
+
+This fixed the cache error: 
+docker rmi -f <docker image id>
+
+git push origin feature/open-telemetry
+
+This worked most recently: 
+docker system prune -a --volumes
+Then: 
+docker-compose build --no-cache
+docker-compose up
