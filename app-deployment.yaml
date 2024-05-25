@@ -26,7 +26,8 @@ spec:
     spec:
       containers:
       - name: interview-app
-        image: wyliebrown1990/interview-app:observe
+        image: wyliebrown1990/interview-app:1.5
+        imagePullPolicy: Always #FML this caused so much confusion
         ports:
         - containerPort: 5000
         env:

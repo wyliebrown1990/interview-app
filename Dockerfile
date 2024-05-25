@@ -7,6 +7,13 @@ ENV PYTHONUNBUFFERED 1
 # Set work directory
 WORKDIR /code
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    ffmpeg \
+    libavcodec-extra \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies
 COPY requirements.txt /code/
 RUN pip install --upgrade pip
@@ -23,5 +30,6 @@ RUN mkdir -p /code/uploads
 EXPOSE 5000
 
 # Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "--timeout", "300", "app:app"]
+
 

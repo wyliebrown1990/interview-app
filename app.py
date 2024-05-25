@@ -26,6 +26,12 @@ from opentelemetry.sdk.trace.export import (
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+#audio transcription
+from pydub import AudioSegment
+import whisper
+
+# Load the Whisper model - there are english only models we can test out in the future.
+model = whisper.load_model("tiny.en")
 
 #start otel config
 
@@ -81,14 +87,25 @@ Base = declarative_base()
 
 # Define the database model
 class TrainingData(Base):
-   __tablename__ = 'training_data'
-   id = Column(Integer, primary_key=True)
-   job_title = Column(String(255), nullable=False)
-   company_name = Column(String(255), nullable=False)
-   data = Column(Text, nullable=False)
-   embeddings = Column(LargeBinary, nullable=True)
-   processed_files = Column(Text, nullable=True)
-   created_at = Column(TIMESTAMP, server_default=func.now())
+    __tablename__ = 'training_data'
+    id = Column(Integer, primary_key=True)
+    job_title = Column(String(255), nullable=False)
+    company_name = Column(String(255), nullable=False)
+    data = Column(Text, nullable=False)
+    embeddings = Column(LargeBinary, nullable=True)
+    processed_files = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+# Define the database model for InterviewAnswer
+class InterviewAnswer(Base):
+    __tablename__ = 'interview_answers'
+    id = Column(Integer, primary_key=True)
+    job_title = Column(String(255), nullable=False)
+    company_name = Column(String(255), nullable=False)
+    industry = Column(String(255), nullable=False)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now())
 
 Base.metadata.create_all(engine)
 
@@ -273,6 +290,88 @@ def continue_interview():
         next_question = get_next_question(session_id, user_response)
 
         return jsonify({'next_question': next_question})
+    
+@app.route('/submit_answer', methods=['POST'])
+def submit_answer():
+    with tracer.start_as_current_span("submit_answer") as span:
+        try:
+            data = request.get_json()
+            job_title = data.get('job_title')
+            company_name = data.get('company_name')
+            industry = data.get('industry')
+            question = data.get('question')
+            answer = data.get('answer')
+
+            new_response = InterviewResponse(
+                job_title=job_title,
+                company_name=company_name,
+                industry=industry,
+                question=question,
+                answer=answer
+            )
+            session.add(new_response)
+            session.commit()
+
+            return jsonify({'message': 'Answer saved successfully'})
+        except Exception as e:
+            logging.error(f"Error in submit_answer: {e}")
+            span.set_status(StatusCode.ERROR, str(e))
+            return jsonify({'message': f"An error occurred: {e}"}), 500
+
+import whisper
+
+# Load the Whisper model
+whisper_model = whisper.load_model("tiny.en")
+
+@app.route('/upload_audio', methods=['POST'])
+def upload_audio():
+    with tracer.start_as_current_span("upload_audio") as span:
+        try:
+            logging.info(f"Request headers: {request.headers}")
+            logging.info(f"Form data: {request.form}")
+
+            if 'audio_data' not in request.files:
+                raise ValueError("No audio_data file in request")
+
+            file = request.files['audio_data']
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'audio.webm')
+            logging.info(f"Received audio file: {file.filename}")
+            file.save(file_path)
+            logging.info(f"Audio file saved at {file_path}")
+            
+            # Convert audio file to WAV format using pydub
+            audio = AudioSegment.from_file(file_path)
+            wav_path = os.path.join(app.config['UPLOAD_FOLDER'], 'audio.wav')
+            audio.export(wav_path, format='wav')
+            logging.info(f"Audio file converted to WAV format at {wav_path}")
+
+            # Transcribe audio using Whisper
+            logging.info("Starting transcription with Whisper...")
+            transcription = whisper_model.transcribe(wav_path)
+            text = transcription['text']
+            logging.info(f"Transcription result: {text}")
+
+            # Save the transcription to the database
+            job_title = request.form.get('job_title')
+            company_name = request.form.get('company_name')
+            industry = request.form.get('industry')
+            interview_question = request.form.get('interview_question')
+            
+            new_answer = InterviewAnswer(
+                job_title=job_title,
+                company_name=company_name,
+                industry=industry,
+                question=interview_question,
+                answer=text
+            )
+            session.add(new_answer)
+            session.commit()
+
+            return jsonify({'transcription': text})
+        except Exception as e:
+            logging.error(f"Error in upload_audio: {e}")
+            span.set_status(StatusCode.ERROR, str(e))
+            return jsonify({'error': str(e)}), 400
 
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=False)
