@@ -10,38 +10,55 @@
         let audioChunks = [];
 
         async function startRecording() {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
+            document.getElementById('status').textContent = "Starting recording...";
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                document.getElementById('status').textContent = "Recording...";
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.start();
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+                mediaRecorder.onstop = () => {
+                    document.getElementById('status').textContent = "Processing audio...";
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const formData = new FormData();
+                    formData.append('audio_data', audioBlob, 'audio.webm');
+                    formData.append('job_title', document.getElementById('job_title').value);
+                    formData.append('company_name', document.getElementById('company_name').value);
+                    formData.append('industry', document.getElementById('industry').value);
+                    formData.append('interview_question', document.getElementById('interview_question').value);
 
-            mediaRecorder.ondataavailable = event => {
-                audioChunks.push(event.data);
-            };
-
-            mediaRecorder.onstop = async () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                const formData = new FormData();
-                formData.append('file', audioBlob, 'audio.webm');
-
-                const response = await fetch('/upload_audio', {
-                    method: 'POST',
-                    body: formData
-                });
-                const data = await response.json();
-                document.getElementById('transcription').innerText = data.transcription;
-            };
-
-            mediaRecorder.start();
+                    fetch('/upload_audio', {
+                        method: 'POST',
+                        body: formData
+                    }).then(response => response.json()).then(data => {
+                        if (data.error) {
+                            document.getElementById('status').textContent = `Error: ${data.error}`;
+                        } else {
+                            document.getElementById('user_response').value = data.transcription;
+                            document.getElementById('status').textContent = "Transcription complete. Review and edit if necessary, then hit Send.";
+                        }
+                    }).catch(error => {
+                        console.error('Error:', error);
+                        document.getElementById('status').textContent = "Error processing audio. Please try again.";
+                    });
+                };
+            } catch (err) {
+                console.error('Error:', err);
+                document.getElementById('status').textContent = "Permission denied or error occurred. Please allow microphone access and try again.";
+            }
         }
 
-        function stopRecording() {
+        async function stopRecording() {
             mediaRecorder.stop();
-            audioChunks = [];
         }
 
         async function fetchNextQuestion(event) {
             event.preventDefault();  // Prevent form submission
             const userResponse = document.getElementById('user_response').value;
             const sessionId = document.getElementById('session_id').value;
+            document.getElementById('status').textContent = "Sending your response...";
             const response = await fetch('/continue_interview', {
                 method: 'POST',
                 headers: {
@@ -59,6 +76,7 @@
             `;
             document.getElementById('user_response').value = '';  // Clear the input field
             document.getElementById('user_response').style.height = 'auto';  // Reset height
+            document.getElementById('status').textContent = "Ready for your next response.";
         }
 
         function adjustTextareaHeight(element) {
@@ -79,12 +97,16 @@
     </div>
     <form onsubmit="fetchNextQuestion(event);">
         <input type="hidden" id="session_id" value="{{ session_id }}">
+        <input type="hidden" id="job_title" value="{{ job_title }}">
+        <input type="hidden" id="company_name" value="{{ company_name }}">
+        <input type="hidden" id="industry" value="{{ industry }}">
+        <input type="hidden" id="interview_question" value="{{ question }}">
         <label for="user_response">Your Response:</label>
         <textarea id="user_response" name="user_response" rows="5" style="width: 100%;" required oninput="adjustTextareaHeight(this)"></textarea>
         <button type="submit">Send</button>
         <button type="button" onclick="startRecording()">Start Recording</button>
         <button type="button" onclick="stopRecording()">Stop Recording</button>
-        <p id="transcription"></p>
+        <p id="status"></p>
     </form>
 </body>
 </html>
