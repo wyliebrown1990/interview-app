@@ -100,6 +100,23 @@ button {
     cursor: pointer;
 }
 
+/* Image block specific CSS */
+.image-block {
+    background-color: #D6DAC8;
+    padding: 20px;
+    margin-top: 20px;
+    border-radius: 8px;
+    text-align: center;
+    width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.image-block img {
+    max-width: 100%;
+    height: auto;
+}
+
 /* Page Spacing */
 #page-container {
     position: relative;
@@ -126,8 +143,8 @@ button {
 
 /* Media Queries */
 @media (max-width: 768px) {
-    form, .chat-block {
-        width: 100%; /* Makes the form and chat blocks full width */
+    form, .chat-block, .image-block {
+        width: 100%; /* Makes the form, chat blocks, and image block full width */
         padding: 10px; /* Reduces padding */
     }
 
