@@ -1,29 +1,71 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-   <meta charset="UTF-8">
-   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-   <title>Add Training Data</title>
-   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/styles.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Training Data</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script>
+        async function uploadFiles(event) {
+            event.preventDefault();  // Prevent form submission
+
+            const form = document.getElementById('uploadForm');
+            const formData = new FormData(form);
+
+            const logContainer = document.getElementById('logContainer');
+            logContainer.innerHTML = "Starting file upload...<br>";
+
+            try {
+                const response = await fetch('/upload_training_data', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    logContainer.innerHTML += result.logs.join("<br>") + "<br>";
+                    logContainer.innerHTML += "File upload successful!<br>";
+
+                    // Redirect to the interview start page
+                    window.location.href = `/start_interview_without_adding?job_title=${encodeURIComponent(document.getElementById('job_title').value)}&company_name=${encodeURIComponent(document.getElementById('company_name').value)}&industry=${encodeURIComponent(document.getElementById('industry').value)}`;
+                } else {
+                    logContainer.innerHTML += result.logs.join("<br>") + "<br>";
+                    logContainer.innerHTML += `Error: ${result.error}<br>`;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                logContainer.innerHTML += `Error processing files: ${error.message}<br>`;
+            }
+        }
+
+        function confirmSkip(event) {
+            event.preventDefault();
+            document.getElementById('confirmationMessage').textContent = "Redirecting to the interview bot...";
+            event.target.submit();
+        }
+    </script>
 </head>
 <body>
-   <header>
-       <h1>Add Training Data</h1>
-   </header>
-   <p>{{ message }}</p>
-<form action="/upload_training_data" method="POST" enctype="multipart/form-data">
-    <input type="hidden" name="job_title" value="{{ job_title }}">
-    <input type="hidden" name="company_name" value="{{ company_name }}">
-    <input type="hidden" name="industry" value="{{ industry }}">
-    <label for="files">Files:</label>
-    <input type="file" id="files" name="files" multiple required><br>
-    <button type="submit">Upload</button>
+    <header>
+        <h1>Add Training Data</h1>
+    </header>
+    <p>{{ message }}</p>
+    <form id="uploadForm" onsubmit="uploadFiles(event)" enctype="multipart/form-data">
+        <input type="hidden" name="job_title" id="job_title" value="{{ job_title }}">
+        <input type="hidden" name="company_name" id="company_name" value="{{ company_name }}">
+        <input type="hidden" name="industry" id="industry" value="{{ industry }}">
+        <label for="files">Files:</label>
+        <input type="file" id="files" name="files" multiple required><br>
+        <button type="submit">Upload</button>
     </form>
-   <form action="{{ skip_url }}" method="GET">
-       <input type="hidden" name="job_title" value="{{ job_title }}">
-       <input type="hidden" name="company_name" value="{{ company_name }}">
-       <input type="hidden" name="industry" value="{{ industry }}">
-       <button type="submit">Skip</button>
-   </form>
+    <div id="logContainer"></div>
+    <form action="{{ skip_url }}" method="GET" onsubmit="confirmSkip(event)">
+        <input type="hidden" name="job_title" value="{{ job_title }}">
+        <input type="hidden" name="company_name" value="{{ company_name }}">
+        <input type="hidden" name="industry" value="{{ industry }}">
+        <button type="submit">Skip</button>
+    </form>
+    <div id="confirmationMessage"></div>
 </body>
 </html>

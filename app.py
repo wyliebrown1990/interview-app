@@ -109,8 +109,8 @@ class InterviewAnswer(Base):
 
 Base.metadata.create_all(engine)
 
-# Initialize the OpenAI chat model and embeddings model
-model = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key)
+# Initialize the OpenAI chat model and embeddings model with temperature adjustment
+model = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key, temperature=0.2)
 embedder = OpenAIEmbeddings(openai_api_key=api_key)
 
 # In-memory store for chat histories. This allows the chat model to reference previous disucssions.
@@ -190,7 +190,8 @@ def upload_training_data():
         industry = request.form['industry'].strip().lower()
         files = request.files.getlist('files')
 
-        logging.debug(f"Received upload request for job_title={job_title}, company_name={company_name}, industry={industry}")
+        log_messages = []
+        log_messages.append(f"Received upload request for job_title={job_title}, company_name={company_name}, industry={industry}")
 
         for file in files:
             if file and file.filename.endswith('.txt'):
@@ -204,7 +205,7 @@ def upload_training_data():
                 if filename not in existing_files:
                     chunks, embedding_array = create_chunks_and_embeddings_from_file(file_path)
                     if training_data:
-                        logging.debug(f"Updating existing training data for {job_title} at {company_name}")
+                        log_messages.append(f"Updating existing training data for {job_title} at {company_name}")
                         training_data.data += '\n' + '\n'.join(chunks)
                         existing_embeddings = np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536)
                         if embedding_array.size > 0:
@@ -213,7 +214,7 @@ def upload_training_data():
                             training_data.embeddings = np.concatenate((existing_embeddings, embedding_array), axis=0).tobytes()
                         training_data.processed_files += ',' + filename
                     else:
-                        logging.debug(f"Creating new training data for {job_title} at {company_name}")
+                        log_messages.append(f"Creating new training data for {job_title} at {company_name}")
                         new_training_data = TrainingData(
                             job_title=job_title,
                             company_name=company_name,
@@ -225,16 +226,16 @@ def upload_training_data():
                         training_data = new_training_data
 
         try:
-            logging.debug("Committing changes to the database...")
+            log_messages.append("Committing changes to the database...")
             session.commit()
-            logging.debug("Changes committed to the database.")
+            log_messages.append("Changes committed to the database.")
         except Exception as e:
             logging.error(f"Error committing changes to the database: {e}")
             session.rollback()
             span.set_status(StatusCode.ERROR, str(e))
-            return render_template('add_training_data.html', job_title=job_title, company_name=company_name, industry=industry, message=f"Error saving training data: {e}")
+            return jsonify({'error': f"Error saving training data: {e}", 'logs': log_messages}), 500
 
-        return redirect(url_for('start_interview_without_adding', job_title=job_title, company_name=company_name, industry=industry))
+        return jsonify({'message': 'Training data uploaded successfully', 'logs': log_messages})
 
 #Function to query the FAISS index:
 def query_faiss_index(index, embedding_array, query_embedding, k=5):
@@ -270,29 +271,6 @@ def get_initial_question(training_data, industry):
         logging.debug(f"Initial interview question: {response.content}")
 
         return response.content
-
-"""
-def get_next_question(session_id, user_response):
-    with tracer.start_as_current_span("get_next_question") as span:
-        session_history = get_session_history(session_id)
-        session_history.add_message(HumanMessage(content=user_response))
-
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are the world's best interview coach. People looking to advance their careers and perfect their interview answers come to you for critical feedback on their ability to answer interview questions as best as possible."),
-            MessagesPlaceholder(variable_name="messages"),
-            ("system", "Provide feedback on the user's answer. Be very critical of their ability to provide concise and accurate answers. Give them a rating between 0 - 10 on how good their answer was based on how you would expect the world's best job interviewers to perform. After your feedback if you felt the answer given was incomplete then ask another question that goes deeper and more specific on your last question. If the answer is satisfactory to the last question then please ask a new question that is different than any questions you've asked before."),
-        ])
-
-        chain = prompt | model
-
-        response = chain.invoke({"messages": session_history.messages})
-        next_question = response.content
-        session_history.add_message(AIMessage(content=next_question))
-
-        logging.debug(f"Next interview question: {next_question}")
-
-        return next_question
-    """
 
 def get_next_question(session_id, user_response, job_title, company_name):
     with tracer.start_as_current_span("get_next_question") as span:
