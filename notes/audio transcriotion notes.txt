@@ -16,15 +16,16 @@ kubectl delete pvc uploads-pvc-pvc
 
 DIAGNOSE: 
 kubectl delete deployment interview-app
-docker build -t wyliebrown1990/interview-app:1.5 .
-docker push wyliebrown1990/interview-app:1.5
+docker build -t wyliebrown1990/interview-app:1.9 .
+docker push wyliebrown1990/interview-app:1.9
 kubectl apply -f app-deployment.yaml
-kubectl get pods
 kubectl port-forward service/interview-app 5000:5000
+kubectl get pods 
+kubectl logs interview-app-5f74bfd8f7-k6fcx
 
 kubectl describe pod 
-kubectl logs <pod-name>
-kubectl logs interview-app-66cd6479cc-gnt8r
+kubectl logs 
+kubectl logs interview-app-77f9685b88-qvgxc
 
 
 
@@ -49,3 +50,8 @@ kubectl apply -f otel-collector-service.yaml
 kubectl apply -f postgres-service.yaml
 
 kubectl port-forward service/interview-app 5000:5000
+
+psql -U wyliebrown -h localhost -d interview_bot
+
+feature/database-refactor
+git push origin feature/database-refactor
