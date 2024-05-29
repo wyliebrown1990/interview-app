@@ -20,7 +20,7 @@
                     audioChunks.push(event.data);
                 };
                 mediaRecorder.onstop = () => {
-                    document.getElementById('status').textContent = "Processing audio...";
+                    document.getElementById('status').textContent = "Processing your audio...this can take up to a few minutes. If I encounter an error I'll notify you, otherwise wait until I respond with some feedback.";
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     const formData = new FormData();
                     formData.append('audio_data', audioBlob, 'audio.webm');
@@ -69,9 +69,12 @@
                 body: JSON.stringify({ user_response: userResponse, session_id: sessionId, job_title: jobTitle, company_name: companyName }),
             });
             const data = await response.json();
+            console.log('Response data:', data);  // Log the response data
             document.getElementById('chat').innerHTML += `
                 <div class="chat-block">
                     <p>User: ${userResponse}</p>
+                    <p>Bot Feedback: ${data.fact_check_feedback}</p>
+                    <p>Bot Score: ${data.score}</p>
                     <p>Bot: ${data.next_question}</p>
                     <hr>
                 </div>

@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 import logging
 from flask import Flask, render_template, request, redirect, url_for, jsonify
@@ -105,12 +106,15 @@ class InterviewAnswer(Base):
     industry = Column(String(255), nullable=False)
     question = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
+    critique = Column(Text, nullable=False)
+    score = Column(Text, nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
+
 
 Base.metadata.create_all(engine)
 
 # Initialize the OpenAI chat model and embeddings model with temperature adjustment
-model = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key, temperature=0.2)
+model = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key, temperature=0.5)
 embedder = OpenAIEmbeddings(openai_api_key=api_key)
 
 # In-memory store for chat histories. This allows the chat model to reference previous disucssions.
@@ -260,7 +264,7 @@ def get_initial_question(training_data, industry):
         relevant_context = " ".join(relevant_chunks)
 
         prompt = ChatPromptTemplate.from_messages([
-            ("system", f"I want you to conduct a real life job interview with me where you ask me real interview questions I would get as a {training_data.job_title} at {training_data.company_name} in the {industry} industry. Your questions should test my knowledge of the job role and company and challenge me to give concise and relevant answers. Here is some context: {relevant_context}"),
+            ("system", f"You are helping me land a new job by conducting a mock interview with me. You should ask me a new question each time that is related to {training_data.job_title} job role at {training_data.company_name} company in the {industry} industry. Your questions should test my knowledge of the {training_data.job_title} job role and {training_data.company_name} company. You should challenge me to give concise and relevant answers. Here is some context about {training_data.company_name}: {relevant_context}"),
             MessagesPlaceholder(variable_name="messages"),
         ])
 
@@ -299,7 +303,7 @@ def get_next_question(session_id, user_response, job_title, company_name):
 
         # Fact-check the user's response
         fact_check_prompt = ChatPromptTemplate.from_messages([
-            ("system", f"Provide feedback on the user's answer. Be very critical of their ability to provide concise and accurate answers. Give them a rating between 0 - 10 on how good their answer was based on how you would expect the world's best job interviewers to perform. After your feedback if you felt the answer given was incomplete then ask another question that goes deeper and more specific on your last question. If the answer is satisfactory to the last question then please ask a new question that is different than any questions you've asked before. If the user's response referenced anything specific about {company_name} and or {job_title} then verify the accuracy of the user's response. Context: {relevant_context_for_fact_checking}"),
+            ("system", f"Give me critical feedback on how well I answered your last question. Specifically call out the following: Was my answer concise? Did I provide a STAR (Situation, Task, Action, and Result) formatted answer? Did I use too many filler words? Did I provide an answer that was specific to being a {job_title} at {company_name}? Finally, you must always score my answer from between 0 being the worst answer and 10 being the best. Always return a score out of 10. Once you complete giving feedback, move on to ask me a new question you haven’t asked before in this interview. If you need additional context about being a {job_title} at {company_name}, use this: {relevant_context_for_fact_checking}"),
             ("user", user_response),
             MessagesPlaceholder(variable_name="messages"),
         ])
@@ -307,6 +311,11 @@ def get_next_question(session_id, user_response, job_title, company_name):
         fact_check_chain = fact_check_prompt | model
         fact_check_response = fact_check_chain.invoke({"messages": session_history.messages})
         fact_check_feedback = fact_check_response.content
+        logging.debug(f"Fact check feedback: {fact_check_feedback}")
+
+        # Extract score from feedback
+        score = extract_score(fact_check_feedback)
+        logging.debug(f"Extracted score: {score}")
 
         # Query FAISS index for generating the next question
         relevant_embeddings_for_next_question = query_faiss_index(index, embedding_array, response_embedding)
@@ -315,7 +324,7 @@ def get_next_question(session_id, user_response, job_title, company_name):
 
         # Generate the next interview question
         next_question_prompt = ChatPromptTemplate.from_messages([
-            ("system", f"You are the world's best interview coach. Based on the following context, ask a challenging interview question for the job title {job_title} at {company_name}. Context: {relevant_context_for_next_question}"),
+            ("system", f"You are helping me land a new job by conducting a mock interview with me. You should ask me a new question each time that is related to {job_title} job role at {company_name} company. You should reference this Context: {relevant_context_for_next_question}"),
             MessagesPlaceholder(variable_name="messages"),
         ])
 
@@ -326,10 +335,37 @@ def get_next_question(session_id, user_response, job_title, company_name):
 
         logging.debug(f"Next interview question: {next_question}")
 
+        # Save to database
+        new_answer = InterviewAnswer(
+            job_title=job_title,
+            company_name=company_name,
+            industry="industry",
+            question=session_history.messages[0].content,  # Use the first message in the session history as the question
+            answer=user_response,
+            critique=fact_check_feedback,
+            score=score
+        )
+        session.add(new_answer)
+        session.commit()
+
         return {
             "next_question": next_question,
-            "fact_check_feedback": fact_check_feedback
+            "fact_check_feedback": fact_check_feedback,
+            "score": score
         }
+
+
+def extract_score(feedback):
+    match = re.search(r"\b(\d{1,2})\b", feedback)
+    if match:
+        return match.group(1)
+    else:
+        return "Score not found"
+
+def extract_critique(feedback):
+    # Implement logic to extract the critique from the feedback text
+    return feedback  # Adjust this based on your needs
+
 
 @app.route('/continue_interview', methods=['POST'])
 def continue_interview():
@@ -345,7 +381,7 @@ def continue_interview():
         next_question_and_feedback = get_next_question(session_id, user_response, job_title, company_name)
 
         return jsonify(next_question_and_feedback)
-    
+   
 @app.route('/submit_answer', methods=['POST'])
 def submit_answer():
     with tracer.start_as_current_span("submit_answer") as span:
