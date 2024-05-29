@@ -60,13 +60,29 @@
             const sessionId = document.getElementById('session_id').value;
             const jobTitle = document.getElementById('job_title').value;
             const companyName = document.getElementById('company_name').value;
+            const industry = document.getElementById('industry').value;
             document.getElementById('status').textContent = "Sending your response...";
+
+            console.log('Sending data to server:', {
+                user_response: userResponse,
+                session_id: sessionId,
+                job_title: jobTitle,
+                company_name: companyName,
+                industry: industry
+            });
+
             const response = await fetch('/continue_interview', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ user_response: userResponse, session_id: sessionId, job_title: jobTitle, company_name: companyName }),
+                body: JSON.stringify({
+                    user_response: userResponse,
+                    session_id: sessionId,
+                    job_title: jobTitle,
+                    company_name: companyName,
+                    industry: industry
+                }),
             });
             const data = await response.json();
             console.log('Response data:', data);  // Log the response data

@@ -172,15 +172,15 @@ def start_interview_without_adding():
 
             training_data = load_training_data(job_title, company_name)
             if training_data:
-                initial_question = get_initial_question(training_data, industry)
+                initial_question = get_initial_question(training_data, industry, job_title, company_name)
                 session_id = os.urandom(24).hex()
                 session_history = get_session_history(session_id)
                 session_history.add_message(AIMessage(content=initial_question))
                 logging.debug(f"Initial question generated: {initial_question}")
-                return render_template('chat.html', question=initial_question, session_id=session_id, job_title=job_title, company_name=company_name)
+                return render_template('chat.html', question=initial_question, session_id=session_id, job_title=job_title, company_name=company_name, industry=industry)
             else:
                 logging.error(f"No training data found for job_title={job_title}, company_name={company_name}")
-                return render_template('index.html', message="No training data found. To improve results please provide a file path to training data:", job_title=job_title, company_name=company_name)
+                return render_template('index.html', message="No training data found. To improve results please provide a file path to training data:", job_title=job_title, company_name=company_name, industry=industry)
         except Exception as e:
             logging.error(f"Error in start_interview_without_adding: {e}")
             span.set_status(StatusCode.ERROR, str(e))
@@ -247,7 +247,7 @@ def query_faiss_index(index, embedding_array, query_embedding, k=5):
     return [embedding_array[i] for i in I[0]]
 
 #Initial question uses the prompt and Faiss index query data: 
-def get_initial_question(training_data, industry):
+def get_initial_question(training_data, industry, job_title, company_name):
     with tracer.start_as_current_span("get_initial_question") as span:
         chunks = training_data.data.split('\n')
         embedding_array = np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536)
@@ -257,14 +257,16 @@ def get_initial_question(training_data, industry):
         index.add(embedding_array)
         logging.debug("FAISS index created and embeddings added")
         
-        # Example query to retrieve relevant chunks (you can use a more specific query)
-        example_query_embedding = embedder.embed_query("Example query text related to the interview")
+        # Create a dynamic query using the job title, company name, and industry
+        query_text = f"How would a {job_title} demonstrate knowledge of {company_name} in the {industry} industry?"
+        example_query_embedding = embedder.embed_query(query_text)
+        
         relevant_embeddings = query_faiss_index(index, embedding_array, example_query_embedding)
         relevant_chunks = [chunks[np.where(embedding_array == emb)[0][0]] for emb in relevant_embeddings]
         relevant_context = " ".join(relevant_chunks)
 
         prompt = ChatPromptTemplate.from_messages([
-            ("system", f"You are helping me land a new job by conducting a mock interview with me. You should ask me a new question each time that is related to {training_data.job_title} job role at {training_data.company_name} company in the {industry} industry. Your questions should test my knowledge of the {training_data.job_title} job role and {training_data.company_name} company. You should challenge me to give concise and relevant answers. Here is some context about {training_data.company_name}: {relevant_context}"),
+            ("system", f"You are helping me land a new job by conducting a mock interview with me. You should ask me a new question each time that is related to {job_title} job role at {company_name} company in the {industry} industry. Your questions should test my knowledge of the {job_title} job role and {company_name} company. You should challenge me to give concise and relevant answers. Here is some context about {company_name}: {relevant_context}"),
             MessagesPlaceholder(variable_name="messages"),
         ])
 
@@ -276,9 +278,9 @@ def get_initial_question(training_data, industry):
 
         return response.content
 
-def get_next_question(session_id, user_response, job_title, company_name):
+def get_next_question(session_id, user_response, job_title, company_name, industry):
     with tracer.start_as_current_span("get_next_question") as span:
-        logging.debug(f"Getting next question for job_title={job_title}, company_name={company_name}")
+        logging.debug(f"Getting next question for job_title={job_title}, company_name={company_name}, industry={industry}")
 
         session_history = get_session_history(session_id)
         session_history.add_message(HumanMessage(content=user_response))
@@ -339,12 +341,13 @@ def get_next_question(session_id, user_response, job_title, company_name):
         new_answer = InterviewAnswer(
             job_title=job_title,
             company_name=company_name,
-            industry="industry",
+            industry=industry,
             question=session_history.messages[0].content,  # Use the first message in the session history as the question
             answer=user_response,
             critique=fact_check_feedback,
             score=score
         )
+        logging.debug(f"Saving to database: {new_answer}")
         session.add(new_answer)
         session.commit()
 
@@ -353,7 +356,6 @@ def get_next_question(session_id, user_response, job_title, company_name):
             "fact_check_feedback": fact_check_feedback,
             "score": score
         }
-
 
 def extract_score(feedback):
     match = re.search(r"\b(\d{1,2})\b", feedback)
@@ -375,12 +377,14 @@ def continue_interview():
         session_id = data.get('session_id')
         job_title = data.get('job_title')
         company_name = data.get('company_name')
+        industry = data.get('industry')
 
-        logging.debug(f"Continue interview called with job_title={job_title}, company_name={company_name}")
+        logging.debug(f"Continue interview called with job_title={job_title}, company_name={company_name}, industry={industry}")
 
-        next_question_and_feedback = get_next_question(session_id, user_response, job_title, company_name)
+        next_question_and_feedback = get_next_question(session_id, user_response, job_title, company_name, industry)
 
         return jsonify(next_question_and_feedback)
+
    
 @app.route('/submit_answer', methods=['POST'])
 def submit_answer():
