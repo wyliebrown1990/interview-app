@@ -1,0 +1,20 @@
+kubectl delete deployment interview-app
+kubectl delete deployment otel-collector
+kubectl delete deployment observe-collector-collector
+kubectl delete deployment postgres
+
+kubectl delete service interview-app
+kubectl delete service otel-collector
+kubectl delete service observe-collector-collector
+kubectl delete service postgres
+
+kubectl apply -f app-deployment.yaml
+kubectl apply -f otel-collector-deployment.yaml
+kubectl apply -f postgres-deployment.yaml
+
+kubectl apply -f app-service.yaml
+kubectl apply -f otel-collector-service.yaml
+kubectl apply -f postgres-service.yaml
+kubectl apply -f postgres-pvc.yaml
+
+kubectl port-forward service/interview-app 5000:5000

@@ -173,7 +173,7 @@ def start_interview_without_adding():
                 session_history = get_session_history(session_id)
                 session_history.add_message(AIMessage(content=initial_question))
                 logging.debug(f"Initial question generated: {initial_question}")
-                return render_template('chat.html', question=initial_question, session_id=session_id)
+                return render_template('chat.html', question=initial_question, session_id=session_id, job_title=job_title, company_name=company_name)
             else:
                 logging.error(f"No training data found for job_title={job_title}, company_name={company_name}")
                 return render_template('index.html', message="No training data found. To improve results please provide a file path to training data:", job_title=job_title, company_name=company_name)
@@ -236,6 +236,12 @@ def upload_training_data():
 
         return redirect(url_for('start_interview_without_adding', job_title=job_title, company_name=company_name, industry=industry))
 
+#Function to query the FAISS index:
+def query_faiss_index(index, embedding_array, query_embedding, k=5):
+    D, I = index.search(np.array([query_embedding]), k)  # Search the top k nearest neighbors
+    return [embedding_array[i] for i in I[0]]
+
+#Initial question uses the prompt and Faiss index query data: 
 def get_initial_question(training_data, industry):
     with tracer.start_as_current_span("get_initial_question") as span:
         chunks = training_data.data.split('\n')
@@ -245,9 +251,15 @@ def get_initial_question(training_data, industry):
         index = faiss.IndexFlatL2(dimension)
         index.add(embedding_array)
         logging.debug("FAISS index created and embeddings added")
+        
+        # Example query to retrieve relevant chunks (you can use a more specific query)
+        example_query_embedding = embedder.embed_query("Example query text related to the interview")
+        relevant_embeddings = query_faiss_index(index, embedding_array, example_query_embedding)
+        relevant_chunks = [chunks[np.where(embedding_array == emb)[0][0]] for emb in relevant_embeddings]
+        relevant_context = " ".join(relevant_chunks)
 
         prompt = ChatPromptTemplate.from_messages([
-            ("system", f"I want you to conduct a real life job interview with me where you ask me real interview questions I would get as a {training_data.job_title} at {training_data.company_name} in the {industry} industry. Your questions should test my knowledge of the job role and company and challenge me to give concise and relevant answers."),
+            ("system", f"I want you to conduct a real life job interview with me where you ask me real interview questions I would get as a {training_data.job_title} at {training_data.company_name} in the {industry} industry. Your questions should test my knowledge of the job role and company and challenge me to give concise and relevant answers. Here is some context: {relevant_context}"),
             MessagesPlaceholder(variable_name="messages"),
         ])
 
@@ -259,6 +271,7 @@ def get_initial_question(training_data, industry):
 
         return response.content
 
+"""
 def get_next_question(session_id, user_response):
     with tracer.start_as_current_span("get_next_question") as span:
         session_history = get_session_history(session_id)
@@ -279,6 +292,66 @@ def get_next_question(session_id, user_response):
         logging.debug(f"Next interview question: {next_question}")
 
         return next_question
+    """
+
+def get_next_question(session_id, user_response, job_title, company_name):
+    with tracer.start_as_current_span("get_next_question") as span:
+        logging.debug(f"Getting next question for job_title={job_title}, company_name={company_name}")
+
+        session_history = get_session_history(session_id)
+        session_history.add_message(HumanMessage(content=user_response))
+
+        training_data = load_training_data(job_title, company_name)
+        if not training_data:
+            logging.error(f"No training data found for job_title={job_title}, company_name={company_name}")
+            raise ValueError("No training data found for the specified job title and company name.")
+        
+        # Load FAISS index
+        chunks = training_data.data.split('\n')
+        embedding_array = np.frombuffer(training_data.embeddings, dtype='float32').reshape(-1, 1536)
+        dimension = embedding_array.shape[1]
+        index = faiss.IndexFlatL2(dimension)
+        index.add(embedding_array)
+
+        # Query FAISS index for fact-checking the user response
+        response_embedding = embedder.embed_query(user_response)
+        relevant_embeddings_for_fact_checking = query_faiss_index(index, embedding_array, response_embedding)
+        relevant_chunks_for_fact_checking = [chunks[np.where(embedding_array == emb)[0][0]] for emb in relevant_embeddings_for_fact_checking]
+        relevant_context_for_fact_checking = " ".join(relevant_chunks_for_fact_checking)
+
+        # Fact-check the user's response
+        fact_check_prompt = ChatPromptTemplate.from_messages([
+            ("system", f"Provide feedback on the user's answer. Be very critical of their ability to provide concise and accurate answers. Give them a rating between 0 - 10 on how good their answer was based on how you would expect the world's best job interviewers to perform. After your feedback if you felt the answer given was incomplete then ask another question that goes deeper and more specific on your last question. If the answer is satisfactory to the last question then please ask a new question that is different than any questions you've asked before. If the user's response referenced anything specific about {company_name} and or {job_title} then verify the accuracy of the user's response. Context: {relevant_context_for_fact_checking}"),
+            ("user", user_response),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
+
+        fact_check_chain = fact_check_prompt | model
+        fact_check_response = fact_check_chain.invoke({"messages": session_history.messages})
+        fact_check_feedback = fact_check_response.content
+
+        # Query FAISS index for generating the next question
+        relevant_embeddings_for_next_question = query_faiss_index(index, embedding_array, response_embedding)
+        relevant_chunks_for_next_question = [chunks[np.where(embedding_array == emb)[0][0]] for emb in relevant_embeddings_for_next_question]
+        relevant_context_for_next_question = " ".join(relevant_chunks_for_next_question)
+
+        # Generate the next interview question
+        next_question_prompt = ChatPromptTemplate.from_messages([
+            ("system", f"You are the world's best interview coach. Based on the following context, ask a challenging interview question for the job title {job_title} at {company_name}. Context: {relevant_context_for_next_question}"),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
+
+        next_question_chain = next_question_prompt | model
+        next_question_response = next_question_chain.invoke({"messages": session_history.messages})
+        next_question = next_question_response.content
+        session_history.add_message(AIMessage(content=next_question))
+
+        logging.debug(f"Next interview question: {next_question}")
+
+        return {
+            "next_question": next_question,
+            "fact_check_feedback": fact_check_feedback
+        }
 
 @app.route('/continue_interview', methods=['POST'])
 def continue_interview():
@@ -286,10 +359,14 @@ def continue_interview():
         data = request.get_json()
         user_response = data.get('user_response')
         session_id = data.get('session_id')
+        job_title = data.get('job_title')
+        company_name = data.get('company_name')
 
-        next_question = get_next_question(session_id, user_response)
+        logging.debug(f"Continue interview called with job_title={job_title}, company_name={company_name}")
 
-        return jsonify({'next_question': next_question})
+        next_question_and_feedback = get_next_question(session_id, user_response, job_title, company_name)
+
+        return jsonify(next_question_and_feedback)
     
 @app.route('/submit_answer', methods=['POST'])
 def submit_answer():

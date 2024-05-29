@@ -1,5 +1,4 @@
 Creating K8s for interview-bot
-minikube start --driver=qemu2
 
 Install minikube: 
 

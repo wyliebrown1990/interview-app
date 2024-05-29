@@ -58,13 +58,15 @@
             event.preventDefault();  // Prevent form submission
             const userResponse = document.getElementById('user_response').value;
             const sessionId = document.getElementById('session_id').value;
+            const jobTitle = document.getElementById('job_title').value;
+            const companyName = document.getElementById('company_name').value;
             document.getElementById('status').textContent = "Sending your response...";
             const response = await fetch('/continue_interview', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ user_response: userResponse, session_id: sessionId }),
+                body: JSON.stringify({ user_response: userResponse, session_id: sessionId, job_title: jobTitle, company_name: companyName }),
             });
             const data = await response.json();
             document.getElementById('chat').innerHTML += `

@@ -1,0 +1,51 @@
+audio transcriotion notes:
+git push origin feature/audio
+
+docker build -t wyliebrown1990/interview-app:1.3 .
+
+docker push wyliebrown1990/interview-app:1.3
+
+
+NEXT: 
+
+kubectl patch pvc postgres-pvc -p '{"metadata":{"finalizers":null}}'
+kubectl delete pvc postgres-pvc
+
+kubectl patch pvc uploads-pvc-pvc -p '{"metadata":{"finalizers":null}}'
+kubectl delete pvc uploads-pvc-pvc
+
+DIAGNOSE: 
+kubectl delete deployment interview-app
+docker build -t wyliebrown1990/interview-app:1.5 .
+docker push wyliebrown1990/interview-app:1.5
+kubectl apply -f app-deployment.yaml
+kubectl get pods
+kubectl port-forward service/interview-app 5000:5000
+
+kubectl describe pod 
+kubectl logs <pod-name>
+kubectl logs interview-app-66cd6479cc-gnt8r
+
+
+
+kubectl delete deployment interview-app
+kubectl delete deployment otel-collector
+kubectl delete deployment observe-collector-collector
+kubectl delete deployment postgres
+
+kubectl delete service interview-app
+kubectl delete service otel-collector
+kubectl delete service observe-collector-collector
+kubectl delete service postgres
+
+kubectl apply -f postgres-pvc.yaml
+kubectl apply -f uploads-pvc.yaml
+kubectl apply -f app-deployment.yaml
+kubectl apply -f otel-collector-deployment.yaml
+kubectl apply -f postgres-deployment.yaml
+
+kubectl apply -f app-service.yaml
+kubectl apply -f otel-collector-service.yaml
+kubectl apply -f postgres-service.yaml
+
+kubectl port-forward service/interview-app 5000:5000
