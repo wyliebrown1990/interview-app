@@ -1,0 +1,24 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: interview-cluster
+  region: us-east-1
+
+vpc:
+  id: vpc-025e4607eafae104c
+  subnets:
+    private:
+      us-east-1a: { id: subnet-0600a215f2e3bd81f }
+      us-east-1b: { id: subnet-0a0879f8ada49ff8f }
+      us-east-1c: { id: subnet-09f38a0620df0ce1e }
+      us-east-1d: { id: subnet-0d96d9ab98e24e76d }
+      us-east-1f: { id: subnet-07ab08b5e116596af }
+
+nodeGroups:
+  - name: standard-workers
+    instanceType: t3.small
+    desiredCapacity: 3
+    minSize: 1
+    maxSize: 4
+    privateNetworking: true

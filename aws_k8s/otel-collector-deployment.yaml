@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+      - name: otel-collector
+        image: 211125652144.dkr.ecr.us-east-1.amazonaws.com/custom-otel-collector:0.39.0
+        args: ["--config=/etc/otel-collector-config.yaml"]
+        ports:
+        - containerPort: 4317
+        - containerPort: 4318
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/otel-collector-config.yaml
+          subPath: config.yaml
+      volumes:
+      - name: config-volume
+        configMap:
+          name: otel-collector-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+          http:
+    exporters:
+      otlphttp:
+        endpoint: "https://157526203278.collect.observeinc.com/v2/otel"
+        headers:
+          authorization: "Bearer ds1LVAKjxlam4PUjKapg:pYkGnQ5E1ZEiKiuMikkSpW8tM_Uqut8X"
+          content-type: "application/x-protobuf"
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [otlphttp]
+        metrics:
+          receivers: [otlp]
+          exporters: [otlphttp]
+        logs:
+          receivers: [otlp]
+          exporters: [otlphttp]

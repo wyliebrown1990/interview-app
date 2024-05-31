@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interview-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: interview-app
+  template:
+    metadata:
+      labels:
+        app: interview-app
+    spec:
+      containers:
+      - name: interview-app
+        image: 211125652144.dkr.ecr.us-east-1.amazonaws.com/interview-app:1.11
+        ports:
+        - containerPort: 5000
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: interview-app-secrets
+              key: DATABASE_URL
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: interview-app-secrets
+              key: OPENAI_API_KEY
+        - name: ELEVENLABS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: interview-app-secrets
+              key: ELEVENLABS_API_KEY
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector:4317"
+        volumeMounts:
+        - name: uploads-storage
+          mountPath: /code/uploads
+      volumes:
+      - name: uploads-storage
+        persistentVolumeClaim:
+          claimName: uploads-pvc

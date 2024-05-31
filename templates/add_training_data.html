@@ -42,7 +42,10 @@
         function confirmSkip(event) {
             event.preventDefault();
             document.getElementById('confirmationMessage').textContent = "Redirecting to the interview bot...";
-            event.target.submit();
+            const jobTitle = document.getElementById('job_title').value;
+            const companyName = document.getElementById('company_name').value;
+            const industry = document.getElementById('industry').value;
+            window.location.href = `/start_interview_without_adding?job_title=${encodeURIComponent(jobTitle)}&company_name=${encodeURIComponent(companyName)}&industry=${encodeURIComponent(industry)}`;
         }
     </script>
 </head>
@@ -60,12 +63,7 @@
         <button type="submit">Upload</button>
     </form>
     <div id="logContainer"></div>
-    <form action="{{ skip_url }}" method="GET" onsubmit="confirmSkip(event)">
-        <input type="hidden" name="job_title" value="{{ job_title }}">
-        <input type="hidden" name="company_name" value="{{ company_name }}">
-        <input type="hidden" name="industry" value="{{ industry }}">
-        <button type="submit">Skip</button>
-    </form>
+    <button onclick="confirmSkip(event)">Skip</button>
     <div id="confirmationMessage"></div>
 </body>
 </html>
