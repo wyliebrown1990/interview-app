@@ -1,5 +1,6 @@
 import os
 import re
+import base64
 from dotenv import load_dotenv
 import logging
 from flask import Flask, render_template, request, redirect, url_for, jsonify
@@ -30,11 +31,13 @@ from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
 #audio transcription
 from pydub import AudioSegment
 import whisper
+#kubernetes secrets management
+from kubernetes import client, config
 
 # Load the Whisper model - there are english only models we can test out in the future.
 model = whisper.load_model("tiny.en")
 
-#start otel config
+# start otel config
 
 # Resource configuration for tracing
 resource = Resource(attributes={
@@ -50,7 +53,6 @@ otlp_exporter = OTLPSpanExporter(
     insecure=True  # Use TLS in production environments
 )
 
-
 # Set up OpenTelemetry Tracer Provider with OTLP exporter
 provider = TracerProvider(resource=resource)
 otlp_processor = BatchSpanProcessor(otlp_exporter)
@@ -64,10 +66,10 @@ logging.basicConfig(level=logging.DEBUG)
 
 # Load environment variables from .env file
 load_dotenv()
-api_key = os.getenv('OPENAI_API_KEY')
+openai_api_key = os.getenv('OPENAI_API_KEY')
 database_url = os.getenv('DATABASE_URL')
 
-#Output any issue with database env variable
+# Output any issue with database env variable
 if not database_url:
    raise ValueError("DATABASE_URL is not set in the environment variables")
 
@@ -114,8 +116,8 @@ class InterviewAnswer(Base):
 Base.metadata.create_all(engine)
 
 # Initialize the OpenAI chat model and embeddings model with temperature adjustment
-model = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key, temperature=0.5)
-embedder = OpenAIEmbeddings(openai_api_key=api_key)
+model = ChatOpenAI(model="gpt-3.5-turbo", api_key=openai_api_key, temperature=0.5)
+embedder = OpenAIEmbeddings(openai_api_key=openai_api_key)
 
 # In-memory store for chat histories. This allows the chat model to reference previous disucssions.
 chat_histories = {}
@@ -168,7 +170,7 @@ def start_interview_without_adding():
             company_name = request.args.get('company_name').strip().lower()
             industry = request.args.get('industry').strip().lower()
 
-            logging.debug(f"Starting interview without adding for job_title={job_title}, company_name={company_name}, industry={industry}")
+            logging.debug(f"Received GET request with job_title={job_title}, company_name={company_name}, industry={industry}")
 
             training_data = load_training_data(job_title, company_name)
             if training_data:
